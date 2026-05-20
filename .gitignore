@@ -1,0 +1,7 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Local AI/editor tooling (Gemini Antigravity)
+.antigravitycli/
