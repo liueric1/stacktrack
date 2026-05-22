@@ -79,6 +79,41 @@
   color: var(--text);
 }
 
+.input-group {
+  display: grid;
+  gap: 8px;
+}
+
+.input-label {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-h);
+}
+
+.name-input {
+  width: 100%;
+  min-height: 44px;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 14px;
+  color: var(--text-h);
+  background: var(--bg);
+  font: 15px var(--sans);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.name-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+.name-input::placeholder {
+  color: var(--text);
+  opacity: 0.6;
+}
+
 .room-result {
   display: grid;
   gap: 10px;

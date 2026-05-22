@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { io, type Socket } from 'socket.io-client'
 import './App.css'
 
@@ -34,10 +34,20 @@ const lastRoomStorageKey = 'stacktrack:lastRoomId'
 
 function App() {
   const [routeRoomId, setRouteRoomId] = useState(() => readRoomIdFromPath() ?? readLastRoomId())
+  const [hasToken, setHasToken] = useState(() => {
+    const roomId = readRoomIdFromPath() ?? readLastRoomId()
+    return roomId ? !!window.localStorage.getItem(clientTokenStorageKey(roomId)) : false
+  })
 
   useEffect(() => {
     function handlePopState() {
-      setRouteRoomId(readRoomIdFromPath())
+      const nextRoomId = readRoomIdFromPath()
+      setRouteRoomId(nextRoomId)
+      if (nextRoomId) {
+        setHasToken(!!window.localStorage.getItem(clientTokenStorageKey(nextRoomId)))
+      } else {
+        setHasToken(false)
+      }
     }
 
     window.addEventListener('popstate', handlePopState)
@@ -48,65 +58,126 @@ function App() {
     rememberRoom(roomId)
     window.history.pushState({}, '', `/${roomId}`)
     setRouteRoomId(roomId)
+    setHasToken(true)
   }
 
-  if (routeRoomId) {
+  if (routeRoomId && hasToken) {
     return <RoomPage roomId={routeRoomId} />
+  }
+
+  if (routeRoomId && !hasToken) {
+    return (
+      <LandingPage
+        roomId={routeRoomId}
+        onRoomJoined={navigateToRoom}
+      />
+    )
   }
 
   return <LandingPage onRoomCreated={navigateToRoom} />
 }
 
-function LandingPage({ onRoomCreated }: { onRoomCreated: (roomId: string) => void }) {
-  const [isCreating, setIsCreating] = useState(false)
+function LandingPage({
+  roomId,
+  onRoomCreated,
+  onRoomJoined,
+}: {
+  roomId?: string
+  onRoomCreated?: (roomId: string) => void
+  onRoomJoined?: (roomId: string) => void
+}) {
+  const [displayName, setDisplayName] = useState('')
+  const [isProcessing, setIsProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  async function createRoom() {
-    setIsCreating(true)
+  const isJoinMode = !!roomId
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    setIsProcessing(true)
     setError(null)
 
     try {
-      const response = await fetch(`${apiUrl}/api/rooms`, {
-        method: 'POST',
-      })
+      if (isJoinMode) {
+        const clientToken = getOrCreateClientToken(roomId)
+        const joinResponse = await joinPlayerRequest(roomId, clientToken, displayName)
 
-      if (!response.ok) {
-        throw new Error('Room creation failed')
+        if (!joinResponse.ok) {
+          throw new Error('Room join failed')
+        }
+
+        onRoomJoined?.(roomId)
+      } else {
+        const response = await fetch(`${apiUrl}/api/rooms`, {
+          method: 'POST',
+        })
+
+        if (!response.ok) {
+          throw new Error('Room creation failed')
+        }
+
+        const room = (await response.json()) as CreateRoomResponse
+        const clientToken = getOrCreateClientToken(room.roomId)
+        const joinResponse = await joinPlayerRequest(room.roomId, clientToken, displayName)
+
+        if (!joinResponse.ok) {
+          throw new Error('Initial player join failed')
+        }
+
+        onRoomCreated?.(room.roomId)
       }
-
-      const room = (await response.json()) as CreateRoomResponse
-      const clientToken = getOrCreateClientToken(room.roomId)
-      const joinResponse = await joinPlayerRequest(room.roomId, clientToken)
-
-      if (!joinResponse.ok) {
-        throw new Error('Initial player join failed')
-      }
-
-      onRoomCreated(room.roomId)
     } catch {
-      setError('Could not create a room. Check that the backend is running.')
+      setError(
+        isJoinMode
+          ? 'Could not join this room. Check the room URL and backend server.'
+          : 'Could not create a room. Check that the backend is running.'
+      )
     } finally {
-      setIsCreating(false)
+      setIsProcessing(false)
     }
   }
 
   return (
     <main className="app-shell">
-      <section className="room-panel" aria-labelledby="page-title">
+      <form className="room-panel" onSubmit={handleSubmit} aria-labelledby="page-title">
         <div className="intro">
           <p className="eyebrow">Poker Stacktrack</p>
-          <h1 id="page-title">Create a room</h1>
+          <h1 id="page-title">{isJoinMode ? 'Join room' : 'Create a room'}</h1>
           <p className="summary">
-            Start a shared stack tracker and send the room link to the table.
+            {isJoinMode
+              ? `Enter your name to join room ${shortRoomId(roomId)}.`
+              : 'Start a shared stack tracker and send the room link to the table.'}
           </p>
         </div>
 
-        <button className="primary-action" type="button" onClick={createRoom} disabled={isCreating}>
-          {isCreating ? 'Creating...' : 'Create room'}
+        <div className="input-group">
+          <label htmlFor="display-name" className="input-label">
+            Your name (optional)
+          </label>
+          <input
+            id="display-name"
+            type="text"
+            className="name-input"
+            placeholder="e.g. Ada Lovelace"
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            disabled={isProcessing}
+            maxLength={50}
+          />
+        </div>
+
+        <button className="primary-action" type="submit" disabled={isProcessing}>
+          {isProcessing
+            ? isJoinMode
+              ? 'Joining...'
+              : 'Creating...'
+            : isJoinMode
+              ? 'Join room'
+              : 'Create room'}
         </button>
 
         {error ? <p className="error-message">{error}</p> : null}
-      </section>
+      </form>
     </main>
   )
 }
@@ -361,11 +432,11 @@ function generateClientToken(): string {
   return Array.from(randomValues, (value) => value.toString(16).padStart(2, '0')).join('')
 }
 
-function joinPlayerRequest(roomId: string, clientToken: string): Promise<Response> {
+function joinPlayerRequest(roomId: string, clientToken: string, displayName?: string): Promise<Response> {
   return fetch(`${apiUrl}/api/rooms/${roomId}/players`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ clientToken }),
+    body: JSON.stringify({ clientToken, displayName }),
   })
 }
 
