@@ -3,10 +3,53 @@
 
 generator client {
   provider = "prisma-client"
-  output   = "../generated/prisma"
+  output   = "../src/generated/prisma"
 }
 
 datasource db {
   provider = "sqlite"
   url      = env("DATABASE_URL")
+}
+
+model Room {
+  id        String   @id @default(uuid())
+  players   Player[]
+  events    StackEvent[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Player {
+  id              String       @id @default(uuid())
+  roomId          String
+  room            Room         @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  clientTokenHash String
+  displayName     String?
+  isActive        Boolean      @default(true)
+  joinedAt        DateTime     @default(now())
+  leftAt          DateTime?
+  lastSeenAt      DateTime     @default(now())
+  events          StackEvent[]
+
+  @@unique([roomId, clientTokenHash])
+  @@index([roomId])
+}
+
+model StackEvent {
+  id          String         @id @default(uuid())
+  roomId      String
+  room        Room           @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  playerId    String
+  player      Player         @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  type        StackEventType
+  amountCents Int
+  createdAt   DateTime       @default(now())
+
+  @@index([roomId])
+  @@index([playerId])
+}
+
+enum StackEventType {
+  BUY_IN
+  CASH_OUT
 }
